@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Depression State Detection Using Machine Learning</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        h1 {
+            margin-bottom: 100px;
+        }
+        form {
+            display: flex;
+            gap: 30px;
+        }
+        
+    </style>
+</head>
+<body>
+    <h1>Depression States Detection Using Machine Learning</h1>
+    <form id="uploadForm" enctype="multipart/form-data">
+        <input type="text" name="gender" placeholder="Enter your gender">
+        <input type="file" name="file" id="fileInput" accept=".csv">
+        <button type="submit">Upload</button>
+    </form>
+    <div id="predictionResult"></div>
+    <p id="errorMessage" style="color: red; display: none;"></p>
+
+<script>
+    document.getElementById('uploadForm').addEventListener('submit', async function(event) {
+        event.preventDefault();
+    
+        const formData = new FormData();
+        formData.append('file', document.getElementById('fileInput').files[0]);
+
+        const response = await fetch('/upload', {
+            method: 'POST',
+            body: formData
+    });
+
+        const data = await response.json();
+        if (response.ok) {
+            // Display the prediction result in the HTML page
+            document.getElementById('predictionResult').innerText = 'Prediction: ' + data.prediction;
+            document.getElementById('errorMessage').style.display = 'none';
+        } else {
+            // Display error message if prediction fails
+            document.getElementById('errorMessage').innerText = data.error;
+            document.getElementById('errorMessage').style.display = 'block';
+            document.getElementById('predictionResult').innerText = '';
+        }
+    });
+</script>
+    
+</body>
+</html>
