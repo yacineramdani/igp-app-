@@ -225,10 +225,14 @@ def upload():
                 # Process the uploaded file (read CSV, preprocess data, perform prediction)
                 df = pd.read_csv(file)
                 gender = request.form.get('gender')  # Get gender information from form
-                prediction = perform_prediction(df, gender)  # Call perform_prediction with the data and gender
+                prediction = perform_prediction(df, gender)  # Call perform_prediction with the data and 
+
+                # Map prediction value to meaningful labels
+                prediction_label = "This person seems to be Depressed" if prediction == 1 else "This person does not seem to be Depressed"
+
 
                 # Return raw prediction results as JSON
-                return jsonify({'prediction': prediction.tolist()})
+                return jsonify({'prediction': prediction_label})
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
 
