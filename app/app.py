@@ -9,204 +9,197 @@ import joblib
 
 app = Flask(__name__)
 
-# Load the trained machine learning model
-model = joblib.load('trained_qda_model2.pkl')
+# Load the trained machine learning models
+model_both = joblib.load('both_2_feature_gradboost_model.pkl')
+model_male = joblib.load('female_2_feature_gradboost_model.pkl')
+model_female = joblib.load('male_2_feature_lgbm_model.pkl')
 
 # Function for preprocessing data
 def preprocess_data(data):
-    # Function to classify each row of data as either day (0) or night (1) 
+
+    def preprocess_full_days(df, days_to_keep):
+        """
+        Preprocesses a DataFrame by filtering out rows where the count is not equal to the specified number of days for each date.
+
+        Args:
+            df (pandas.DataFrame): The input DataFrame.
+            days_to_keep (int): Number of days to keep for each user.
+
+        Returns:
+            pandas.DataFrame: The preprocessed DataFrame.
+        """
+
+        # number of minutes to keep for each user
+        minutes_to_keep = days_to_keep * 1440
+
+        # filter rows for each date
+        def filter_rows(group):
+            return group.head(minutes_to_keep)
+
+        # filter rows based on the number of days to keep
+        filtered_df = df.groupby('date', group_keys=False).apply(filter_rows)
+
+        return filtered_df
+    FD_df = preprocess_full_days(data, 7)
+
+    # CSV file
+    sunlight_df = pd.read_csv('./Norway_Sunlight.csv')
+    
+    # change sunrise and sunset to datetime
+    sunlight_df['Sunrise'] = pd.to_datetime(sunlight_df['Sunrise'], format='%H:%M')
+    sunlight_df['Sunset'] = pd.to_datetime(sunlight_df['Sunset'], format='%H:%M')
+    
+    #classify each row of data as either light (0) or dark (1)
+    FD_df['timestamp'] = pd.to_datetime(FD_df['timestamp'])
+    def light_dark(dataframe, sunlight_df):
+    
+        # merge the sunlight data with the main df
+        dataframe['month'] = dataframe['timestamp'].dt.month
+        
+        merged_df = pd.merge(dataframe, sunlight_df, left_on='month', right_on='Month', how='left')
+        
+        # convert sunrise and sunset times to datetime.time for comparison
+        merged_df['sunrise_time'] = pd.to_datetime(merged_df['Sunrise'], format='%H:%M:%S').dt.time
+        merged_df['sunset_time'] = pd.to_datetime(merged_df['Sunset'], format='%H:%M:%S').dt.time
+       
+        # classify as light or dark based on the timestamp
+        merged_df['light_dark'] = merged_df.apply(lambda row: 0 if row['sunrise_time'] <= row['timestamp'].time() < row['sunset_time'] else 1, axis=1)
+        return merged_df
+    LD_df = light_dark(FD_df, sunlight_df)
+
+
+    # classify each row of data as either day (0) or night (1)
     def day_or_night(dataframe, day_start, day_end):
-        def day_night_test(time):
-            if day_start <= time.hour < day_end:
-                return 0
-            else:
-                return 1
-
-        # Convert 'timestamp' column to datetime type
-        dataframe['timestamp'] = pd.to_datetime(dataframe['timestamp'])
-
-        # Apply day_night_test function to 'timestamp' column and create 'day_night' column
-        dataframe['day_night'] = dataframe['timestamp'].apply(day_night_test)
-
+        dataframe['day_night'] = dataframe['timestamp'].dt.hour.apply(lambda hour: 0 if day_start <= hour < day_end else 1)
         return dataframe
+    DN_df = day_or_night(LD_df, 8, 20 )
 
-    DN_df = day_or_night(data, 8, 20)
-
-    # Function to create a field of active (1) and non-active (0) time
-    def active_nonactive(dataframe):
-        def time_test(activity):
-            if activity < 5:
-                return 0
-            else:
-                return 1 
-
-        new_df = dataframe.copy()
-
-        new_df['col1'] = new_df['activity'].apply(time_test)
-
-        new_df['col2'] = new_df['col1'].rolling(window=11, center=True, min_periods=1).sum()
-
-        def activ_test(value):
-            if value >= 2:
-                return 1    
-            elif value < 2:
-                return 0
-            else:
-                return np.nan
-
-        new_df['active_inactive'] = new_df['col2'].apply(activ_test)
-
-        new_df.drop(['col1','col2'], axis=1, inplace=True)
-
-        return new_df
-
-    active_df = active_nonactive(DN_df)
-
-    def light_dark(dataframe):
-        dataframe['time'] = pd.to_datetime(dataframe['timestamp']).dt.time
-
-        sunrise = pd.to_datetime('06:00:00').time()
-        sunset = pd.to_datetime('18:00:00').time()
-
-        time = dataframe['time']
-
-        light_dark = []
-        for n in range(0, len(time)):
-            if sunrise <= time[n] < sunset:
-                light_dark.append(0)
-            else:
-                light_dark.append(1)
-
-        dataframe['light_dark'] = light_dark
-
-        dataframe.drop(['time'], axis=1, inplace=True)
-
+    # create a field of active (1) and non-active (0) time
+    def active_nonactive(dataframe, activity_threshold=5, rolling_window=11, rolling_threshold=2):
+        dataframe['active_inactive'] = dataframe['activity'].apply(lambda x: 1 if x >= activity_threshold else 0)
+        dataframe['rolling_sum'] = dataframe['active_inactive'].rolling(window=rolling_window, center=True).sum()
+        dataframe['active_inactive_period'] = dataframe['rolling_sum'].apply(lambda x: 1 if x >= rolling_threshold else 0)
+        dataframe.drop('rolling_sum', axis=1, inplace=True)
         return dataframe
+    AN_df = active_nonactive(DN_df)
 
-    LD_df = light_dark(active_df)
-
-    # Function to extract only the full days
-    def fullDays(dataframe):
-        df_new = pd.DataFrame({})
-
-        for _, participant_data in dataframe.groupby('date'):
-            min_timestamp = participant_data['timestamp'].min().date()
-            max_timestamp = participant_data['timestamp'].max().date()
-
-            min_date = min_timestamp
-            max_date = max_timestamp
-
-            df_maxchange = participant_data[(participant_data['timestamp'].dt.date >= min_date) & 
-                                            (participant_data['timestamp'].dt.date < max_date + timedelta(days=1))]
-
-            df_new = pd.concat([df_new, df_maxchange])
-
-        return df_new
-
-    fulldays_df = fullDays(LD_df)
-
-    def weekDays(dataframe):
-        df_new = pd.DataFrame({})
-
-        dataframe['date'] = pd.to_datetime(dataframe['date'])
-
-        for _, participant_data in dataframe.groupby('date'):
-            min_date = participant_data['date'].min()
-            max_date = participant_data['date'].max()
-
-            week_end = min_date + timedelta(7) if (max_date - min_date).days <= 7 else min_date + timedelta(14)
-
-            df_week = participant_data[participant_data['date'] < week_end]
-
-            df_new = pd.concat([df_new, df_week])
-
-        return df_new
-
-    clean_df = weekDays(fulldays_df)
-
-    clean_df['day'] = pd.to_datetime(clean_df['timestamp']).dt.day
-
-    def Percentzero(values):
-        zeros = (values == 0).sum().sum()
-        total_values = values.size
+    # calculate the percentage of zeros in a series
+    def percent_zero(series):
+        zeros = (series == 0).sum()
+        total_values = series.size
         return zeros / total_values * 100
+    zeros = percent_zero(AN_df)
 
     def extract_features(dataframe):
-        grouped = dataframe.groupby(['day'])['activity']
+        grouped = dataframe.groupby(['date'])['activity']
+        features_df = grouped.agg(
+            mean='mean',
+            std='std',
+            median='median', 
+            q1=lambda x: np.percentile(x, 25),  # Add 1st quartile calculation
+            q3=lambda x: np.percentile(x, 75),  # Add 3rd quartile calculation
+            percent_zero=percent_zero,
+            kurtosis=lambda x: sp.kurtosis(x, fisher=False)
+        ).reset_index()
+        features_df['kurtosis'] = features_df['kurtosis'].fillna(0)
+        return features_df
+    features = extract_features(AN_df).reset_index()
 
-        features1_df = pd.DataFrame({
-            'mean': grouped.mean(),
-            'std': grouped.std(),
-            '%zero': grouped.apply(Percentzero),
-            'kurtosis': grouped.apply(lambda x: sp.kurtosis(x, fisher=False))
+
+    def activity_proportions(dataframe):
+        # Create empty lists to store results
+        inactive_day_prop = []
+        active_night_prop = []
+        inactive_light_prop = []
+        active_dark_prop = []
+
+        # Calculate proportions
+        # inactiveDay
+        inactive_day_prop = dataframe.loc[dataframe['day_night'] == 0, 'active_inactive'].mean()
+
+        # activeNight
+        active_night_prop = dataframe.loc[dataframe['day_night'] == 1, 'active_inactive'].mean()
+
+        # inactiveLight
+        inactive_light_prop = dataframe.loc[dataframe['light_dark'] == 0, 'active_inactive'].mean()
+
+        # activeDark
+        active_dark_prop = dataframe.loc[dataframe['light_dark'] == 1, 'active_inactive'].mean()
+
+        # Create DataFrame for results
+        results = pd.DataFrame({
+            'date': dataframe['date'].unique(),
+            'inactiveDay': inactive_day_prop,
+            'activeNight': active_night_prop,
+            'inactiveLight': inactive_light_prop,
+            'activeDark': active_dark_prop
         })
 
-        return features1_df
+        # Drop unnecessary columns from original DataFrame
+        columns_to_drop = ['day_night', 'active_inactive', 'active_inactive_period','light_dark', 'timestamp', 'month', 'Sunrise', 'Sunset', 'sunrise_time', 'sunset_time', 'activity']
+        dataframe.drop(columns=columns_to_drop, inplace=True)
 
-    features1 = extract_features(clean_df).reset_index()
-
-    def activeAtNight(dataframe):
-        grouped = dataframe.groupby('day')
-
-        dfs_to_concat = []
-
-        for day, group in grouped:
-            inactive_day = len(group[(group['day_night'] == 0) & (group['active_inactive'] == 0)])
-            active_night = len(group[(group['day_night'] == 1) & (group['active_inactive'] == 1)])
-            night = len(group[group['day_night'] == 1])
-            day_count = len(group[group['day_night'] == 0])
-            inactive_light = len(group[(group['light_dark'] == 0) & (group['active_inactive'] == 0)])
-            active_dark = len(group[(group['light_dark'] == 1) & (group['active_inactive'] == 1)])
-            dark = len(group[group['light_dark'] == 1])
-            light = len(group[group['light_dark'] == 0])        
-
-            active_night_percent = active_night / night if night != 0 else 0
-            inactive_day_percent = inactive_day / day_count if day_count != 0 else 0
-            active_dark_percent = active_dark / dark if dark != 0 else 0
-            inactive_light_percent = inactive_light / light if light != 0 else 0
-
-            df_ndld = pd.DataFrame({'day': [day],
-                                'activeNight': [active_night_percent],
-                                'inactiveDay': [inactive_day_percent],
-                                'activeDark': [active_dark_percent],
-                                'inactiveLight': [inactive_light_percent]})
+        # Merge the results back into the original DataFrame
+        dataframe = pd.merge(dataframe, results, on='date', how='left')
         
-            dfs_to_concat.append(df_ndld)
 
-        df_ndld = pd.concat(dfs_to_concat, ignore_index=True)
+        # Remove duplicates
+        dataframe.drop_duplicates(inplace=True)
+        
 
-        return df_ndld
+        return dataframe
+    
+    features1 = activity_proportions(AN_df)
+    print(features1)
 
+    def calculate_all_features(dataframe, sunlight_df):
+        # convert 'timestamp' to datetime
+        dataframe['timestamp'] = pd.to_datetime(dataframe['timestamp'])
 
-    AN = activeAtNight(clean_df)
+        # light/dark classification using Norway sunlight data
+        dataframe = light_dark(dataframe, sunlight_df)
 
-    features_full = pd.merge(AN, features1, on=['day'], how='inner')
+        # day/night classification
+        dataframe = day_or_night(dataframe, 8, 21)  # day is 08:00-20:59 inclusive
 
-    features_full.drop(['%zero','activeNight','inactiveDay', 'kurtosis', 'day'], axis=1, inplace=True)
+        # active/non-active classification
+        dataframe = active_nonactive(dataframe)
 
-    return features_full
+        # statistical features
+        statistical_features = extract_features(dataframe)
 
+        # active/inactive periods
+        period_features = activity_proportions(dataframe)
+
+        # merge all features
+        all_features = pd.merge(period_features, statistical_features, on=['date'], how='inner')
+
+        # Select only 'inactiveDay' and 'activeNight' columns
+        all_features = all_features[['date', 'inactiveDay', 'activeNight']]
+
+        return all_features
+    
+    all_features = calculate_all_features(data, sunlight_df)
+    
 # Function to perform prediction
-def perform_prediction(data):
-    # Preprocess the input data
-    df = preprocess_data(data)
+def perform_prediction(data, gender):
+    # Preprocess the data
+    preprocessed_data = preprocess_data(data)
     
-    # Scale the features (if needed)
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(df)
-    
-    # Make prediction using the trained model
-    prediction = model.predict(X_scaled)
-    
-    return prediction
+    # Determine which model to use based on gender
+    if gender == 'male':
+        model = model_male
+    elif gender == 'female':
+        model = model_female
+    else:
+        model = model_both
 
-def get_most_frequent_prediction(predictions):
-    """
-    Get the most frequent prediction from a list of predictions.
-    """
-    unique_predictions, counts = np.unique(predictions, return_counts=True)
-    most_frequent_prediction = unique_predictions[np.argmax(counts)]
-    return most_frequent_prediction
+    try:
+        # Perform prediction
+        prediction = model.predict(preprocessed_data)
+        return prediction.tolist()  # Convert prediction to list before returning
+    except Exception as e:
+        return str(e)  # Return error message if prediction fails
 
 
 # Define routes
@@ -231,23 +224,17 @@ def upload():
             try:
                 # Process the uploaded file (read CSV, preprocess data, perform prediction)
                 df = pd.read_csv(file)
-                prediction = perform_prediction(df)
+                gender = request.form.get('gender')  # Get gender information from form
+                prediction = perform_prediction(df, gender)  # Call perform_prediction with the data and gender
 
-                # Determine the most frequent prediction
-                most_frequent_prediction = get_most_frequent_prediction(prediction)
-
-                # Map prediction value to meaningful labels
-                prediction_label = "This person seems to be Depressed" if most_frequent_prediction == 1 else "This person does not seem to be Depressed"
-
-                # Return prediction result as JSON
-                return jsonify({'prediction': prediction_label})
+                # Return raw prediction results as JSON
+                return jsonify({'prediction': prediction.tolist()})
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
 
     return jsonify({'error': 'Invalid request method'}), 405
 
 
+
 if __name__ == '__main__':
     app.run(debug=True)
-
-

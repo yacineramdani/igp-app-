@@ -96,7 +96,11 @@
     <p class="desc">Welcome to our demo app developed for the IGP project, dedicated to detecting depression states using machine learning. </p>
     
     <form id="uploadForm" enctype="multipart/form-data">
-        <input class="gender" type="text" name="gender" placeholder="Enter your gender">
+        <select class="gender" name="gender">
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+            <option value="not_specified">Not Specified</option>
+        </select>
         <input type="file" name="file" id="fileInput" accept=".csv">
         <button type="submit">Upload</button>
     </form>
@@ -104,29 +108,31 @@
     <p id="errorMessage" style="color: red; display: none;"></p>
 
 <script>
-    document.getElementById('uploadForm').addEventListener('submit', async function(event) {
-        event.preventDefault();
-    
-        const formData = new FormData();
-        formData.append('file', document.getElementById('fileInput').files[0]);
+document.getElementById('uploadForm').addEventListener('submit', async function(event) {
+    event.preventDefault();
 
-        const response = await fetch('/upload', {
-            method: 'POST',
-            body: formData
+    const formData = new FormData();
+    formData.append('file', document.getElementById('fileInput').files[0]);
+    formData.append('gender', document.querySelector('select[name="gender"]').value);
+
+    const response = await fetch('/upload', {
+        method: 'POST',
+        body: formData
     });
 
-        const data = await response.json();
-        if (response.ok) {
-            // Display the prediction result in the HTML page
-            document.getElementById('predictionResult').innerText = 'Prediction: ' + data.prediction;
-            document.getElementById('errorMessage').style.display = 'none';
-        } else {
-            // Display error message if prediction fails
-            document.getElementById('errorMessage').innerText = data.error;
-            document.getElementById('errorMessage').style.display = 'block';
-            document.getElementById('predictionResult').innerText = '';
-        }
-    });
+    const data = await response.json();
+    if (response.ok) {
+        // Display the prediction result in the HTML page
+        document.getElementById('predictionResult').innerText = 'Prediction: ' + data.prediction;
+        document.getElementById('errorMessage').style.display = 'none';
+    } else {
+        // Display error message if prediction fails
+        document.getElementById('errorMessage').innerText = data.error;
+        document.getElementById('errorMessage').style.display = 'block';
+        document.getElementById('predictionResult').innerText = '';
+    }
+});
+
 </script>
     
 </body>
